@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.arkai.inference.roop";
+option java_outer_classname = "RoopService";
+option objc_class_prefix = "ROOP";
+option go_package = "gitlab.in.promiseland.live/ark/ark-api/ai_grpc";
+
+package roop;
+
+service Roop {
+  rpc faceSwap(RoopInputMsg) returns (RoopResponse) {}
+  rpc faceEnhancement(RoopInputMsg) returns (RoopResponse) {}
+}
+
+message RoopInputMsg {
+  string source = 1; // oss源文件路径名（脸）
+  string target = 2; // oss目标文件路径名（被换脸）
+  string processor = 3; // swapface: 换脸+美颜；enhancement：仅美颜
+  int32 reference_face_position = 4; 
+  string dest = 5; // oss目标路径名（生成结果）
+}
+
+message RoopResponse {
+  bool result = 1;
+  string dest = 2;
+}
