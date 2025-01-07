@@ -78,6 +78,7 @@ def finalize_steps(job_id : str) -> bool:
 				return False
 		if any(map(is_image, temp_output_paths)):
 			for temp_output_path in temp_output_paths:
+				print(f'cannot move {temp_output_path} to {output_path}')
 				if not move_file(temp_output_path, output_path):
 					return False
 	return True

@@ -2,7 +2,7 @@ import shutil
 import signal
 import sys
 from time import time
-
+import uuid
 import numpy
 
 from facefusion import content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, logger, process_manager, state_manager, voice_extractor, wording
@@ -293,12 +293,23 @@ def process_step(job_id : str, step_index : int, step_args : Args) -> bool:
 
 
 def process_headless(args : Args) -> ErrorCode:
-	job_id = job_helper.suggest_job_id('headless')
+	job_id = job_helper.suggest_job_id('headless_' + str(uuid.uuid4()))
 	step_args = reduce_step_args(args)
 
-	if job_manager.create_job(job_id) and job_manager.add_step(job_id, step_args) and job_manager.submit_job(job_id) and job_runner.run_job(job_id, process_step):
-		return 0
-	return 1
+	if not job_manager.create_job(job_id):
+		logger.error("cannot create job " + job_id, __name__)
+		return 1
+
+	if not job_manager.add_step(job_id, step_args):
+		logger.error("cannot add steps for job " + job_id, __name__)
+		return 1
+	if not job_manager.submit_job(job_id):
+		logger.error("cannot submit job " + job_id, __name__)
+		return 1
+	if not job_runner.run_job(job_id, process_step):
+		logger.error("cannot run job " + job_id, __name__)
+		return 1
+	return 0
 
 
 def process_image(start_time : float) -> ErrorCode:

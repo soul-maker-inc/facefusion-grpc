@@ -9,12 +9,18 @@ from facefusion import core, state_manager
 from facefusion.args import apply_args, collect_job_args, reduce_step_args
 from facefusion.jobs import job_helper, job_manager, job_runner, job_store
 from facefusion.program import create_program
+import threading
+import math
+from PIL import Image
+from facenet_pytorch import MTCNN
 
 class RoopService(roop_pb2_grpc.RoopServicer):
+    lock = threading.Lock()
+    mtcnn = MTCNN(select_largest=False, device='cpu')
 
     def setup(self):
        create_program()
-       self.devices = ['coreml'] # cuda, tensorrt, openvino, directml, rocm, coreml, cpu
+       self.devices = [os.environ.get('DEVICE') or "coreml"] # cuda, tensorrt, openvino, directml, rocm, coreml, cpu
        job_store.register_job_keys([ 'jobs_path', 'config-path' ])
        job_store.register_step_keys([ 'source_paths', 'target_path', 'output_path', 'processors',
                                       'face_detector_model', 'face_detector_angles', 'face_detector_size', 'face_detector_score',
@@ -32,7 +38,7 @@ class RoopService(roop_pb2_grpc.RoopServicer):
         return {
             'command': 'headless-run',
             'config_path': 'facefusion.ini',
-            'jobs_path': '/tmp/facefusion/jobs',
+            'jobs_path': os.environ.get('JOBS_PATH') or '/tmp/facefusion/jobs',
             'source_paths': [],
             'target_path': '',
             'output_path': '',
@@ -133,38 +139,114 @@ class RoopService(roop_pb2_grpc.RoopServicer):
 			'video_memory_strategy': 'strict',
 			'system_memory_limit': 0,
 			'skip_download': True,
-			'log_level': 'info'
+			'log_level': 'debug'
 		}
 
-    def _run(self, srcfile, tgtfile, output_path, processors, reference_face_position):
+    def _run(self, srcfiles, tgtfile, output_path, processors, reference_face_position):
         args = self._initArgs()
-        args['source_paths'] = [srcfile]
+        args['source_paths'] = srcfiles
         args['target_path'] = tgtfile
         args['output_path'] = output_path
         args['processors'] = processors.split(',')
         args['reference_face_position'] = reference_face_position
         apply_args(args, state_manager.init_item)
         if not job_manager.init_jobs(state_manager.get_item('jobs_path')):
+            logging.info('failed, cannot init job')
             return 0
         error_core = core.process_headless(args)
         return error_core
 
 
+    def locateFace(self, frame):
+        logging.info(f"photo size: {frame.width} x {frame.height}")
+        fcx = frame.width / 2
+        fcy = frame.height / 2
+        boxes, probs = self.mtcnn.detect(frame, landmarks=False)
+        box = None
+        box_score = 9999999999999
+        for i in range(len(boxes)):
+            logging.info(f"box[{i}]: prob={probs[i]}, box={boxes[i]}")
+            if probs[i] > 0.95:
+                if box is None:
+                    box = boxes[i]
+                #取最接近中央的
+                detectedBox = boxes[i]
+                cx = (detectedBox[0]+detectedBox[2])*0.5
+                cy = (detectedBox[1]+detectedBox[3])*0.5
+                w = detectedBox[2] - detectedBox[0]
+                h = detectedBox[3] - detectedBox[1]
+                score0 = math.sqrt((cx-fcx)*(cx-fcx) + (cy-fcy)*(cy-fcy))
+                logging.info(f"box[{i}]: score={score0}")
+                if score0 < box_score:
+                    box_score = score0
+                    box = boxes[i]
+        if box is not None:
+            image_size = 512
+            cx = (box[0]+box[2])*0.5
+            cy = (box[1]+box[3])*0.5
+            w = box[2] - box[0]
+            h = box[3] - box[1]
+            w0 = max(w,h) * 2
+            logging.info("cropping face (%d, %d, %d, %d)",cx - w0*0.5, cy - w0*0.5, cx + w0*0.5,cy + w0*0.5)
+            faceimg = frame.crop((cx - w0*0.5, cy - w0*0.5, cx + w0*0.5,cy + w0*0.5)).resize((int(image_size*0.9),image_size))
+            return faceimg
+        return None
+
     def faceSwap(self, request, context):
         # 下载给定文件
         srcfile = download_minio(request.source)
         tgtfile = download_minio(request.target)
+        # 取最中央、最大的脸
+        frame = Image.open(srcfile).convert('RGB')
+        faceimg = self.locateFace(frame)
+        if faceimg is not None:
+            logging.info(f"saved cropped face to {srcfile}")
+            faceimg.save(srcfile)
+        else:
+            logging.error(f"cannot found center face from {srcfile}")
+
         # 输出路径
         tmpPath = tempfile.gettempdir()
         output_path = tmpPath + '/' + str(uuid.uuid4()) + os.path.splitext(srcfile)[1]
         logging.info('output: %s', output_path)
         # 执行
-        result = self._run(srcfile, tgtfile, output_path, request.processor, request.reference_face_position)
+        self.lock.acquire()
+        result = self._run([srcfile], tgtfile, output_path, request.processor, request.reference_face_position)
+        self.lock.release()
         if result == 0:
 			# 上传结果
             dest = upload_to_minio(output_path, request.dest)
+            logging.info('success, dest: %s', dest)
             return roop_pb2.RoopResponse(result=True, dest=dest)
         else:
+            logging.info('failed, result = %d', result)
+            return roop_pb2.RoopResponse(result=False, dest="")
+
+    def faceSwapV2(self, request, context):
+        srcfiles = []
+        # 下载给定文件
+        for src in request.sources:
+            logging.info('loading source face: %s', src)
+            srcfile = download_minio(src)
+            srcfiles.append(srcfile)
+        logging.info('loading target face: %s', src)
+        tgtfile = download_minio(request.target)
+
+        # 输出路径
+        tmpPath = tempfile.gettempdir()
+        output_path = tmpPath + '/' + str(uuid.uuid4()) + os.path.splitext(srcfile)[1]
+        logging.info('output: %s', output_path)
+        # 执行
+        self.lock.acquire()
+        result = self._run(srcfiles, tgtfile, output_path, request.processor, request.reference_face_position)
+        self.lock.release()
+        if result == 0:
+			# 上传结果
+            dest = upload_to_minio(output_path, request.dest)
+            logging.info('success, dest: %s', dest)
+            return roop_pb2.RoopResponse(result=True, dest=dest)
+        else:
+            logging.info('failed, result = %d', result)
             return roop_pb2.RoopResponse(result=False, dest="")
 
     def faceEnhancement(self, request, context):

@@ -11,6 +11,8 @@ from facefusion.json import read_json, write_json
 from facefusion.temp_helper import create_base_directory
 from facefusion.typing import Args, Job, JobSet, JobStatus, JobStep, JobStepStatus
 
+import logging
+
 JOBS_PATH : Optional[str] = None
 
 
@@ -209,7 +211,7 @@ def read_job_file(job_id : str) -> Optional[Job]:
 
 def create_job_file(job_id : str, job : Job) -> bool:
 	job_path = find_job_path(job_id)
-
+	logging.info('creating job %s, job_path = %s', job_id, job_path)
 	if not is_file(job_path):
 		job_create_path = suggest_job_path(job_id, 'drafted')
 		return write_json(job_create_path, job) #type:ignore[arg-type]

@@ -39,6 +39,11 @@ class RoopStub(object):
                 request_serializer=roop__pb2.RoopInputMsg.SerializeToString,
                 response_deserializer=roop__pb2.RoopResponse.FromString,
                 _registered_method=True)
+        self.faceSwapV2 = channel.unary_unary(
+                '/roop.Roop/faceSwapV2',
+                request_serializer=roop__pb2.RoopInputMsgV2.SerializeToString,
+                response_deserializer=roop__pb2.RoopResponse.FromString,
+                _registered_method=True)
         self.faceEnhancement = channel.unary_unary(
                 '/roop.Roop/faceEnhancement',
                 request_serializer=roop__pb2.RoopInputMsg.SerializeToString,
@@ -50,6 +55,12 @@ class RoopServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def faceSwap(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def faceSwapV2(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -67,6 +78,11 @@ def add_RoopServicer_to_server(servicer, server):
             'faceSwap': grpc.unary_unary_rpc_method_handler(
                     servicer.faceSwap,
                     request_deserializer=roop__pb2.RoopInputMsg.FromString,
+                    response_serializer=roop__pb2.RoopResponse.SerializeToString,
+            ),
+            'faceSwapV2': grpc.unary_unary_rpc_method_handler(
+                    servicer.faceSwapV2,
+                    request_deserializer=roop__pb2.RoopInputMsgV2.FromString,
                     response_serializer=roop__pb2.RoopResponse.SerializeToString,
             ),
             'faceEnhancement': grpc.unary_unary_rpc_method_handler(
@@ -101,6 +117,33 @@ class Roop(object):
             target,
             '/roop.Roop/faceSwap',
             roop__pb2.RoopInputMsg.SerializeToString,
+            roop__pb2.RoopResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def faceSwapV2(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/roop.Roop/faceSwapV2',
+            roop__pb2.RoopInputMsgV2.SerializeToString,
             roop__pb2.RoopResponse.FromString,
             options,
             channel_credentials,
